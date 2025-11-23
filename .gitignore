@@ -1,0 +1,33 @@
+# Byte-compiled / cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments and local settings
+venv/
+.env
+.venv/
+
+# Notebook checkpoints and IDE config
+.ipynb_checkpoints/
+.vscode/
+.idea/
+
+# Dataset folders (large, regenerable artifacts)
+data*/
+**/data*/
+dataset*/
+**/dataset*/
+datasets*/
+**/datasets*/
+andreas_data/
+split_data*/
+split_data_small_test/
+split_data_train_20000_random/
+split_data_validation*/
+split_data_validation_20000_random/
+test_data/
+
+# Any folder containing "data" in its name
+*data*/
+*Data*/
