@@ -40,6 +40,9 @@ This repository contains the experiments and tooling I used for the CSCE 636 dee
    - Adjust `data_per_file` or `combinations` to control shard size and coverage.
 4. For quick sanity checks you can generate miniature folders via `create_small_test_set.py` or reuse the provided `split_data_small_test/` directory.
 
+I may publish the dataset on huggingface for people who needs to use it. 
+
+
 ## Training the Best Model
 The reproducible pipeline lives in `final_best_model_training.py`.
 ```bash

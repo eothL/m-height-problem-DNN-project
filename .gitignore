@@ -12,11 +12,14 @@ venv/
 .ipynb_checkpoints/
 .vscode/
 .idea/
+
+# file to ignore
 *.log
 *.tmp
 *.ckpt
 *.pyc
 *.pth
+*pkl
 
 
 # Dataset folders (large, regenerable artifacts)
@@ -34,6 +37,7 @@ split_data_validation*/
 split_data_validation_20000_random/
 test_data/
 local/
+folder_to_submit/ 
 
 
 # Any folder containing "data" in its name
