@@ -12,6 +12,12 @@ venv/
 .ipynb_checkpoints/
 .vscode/
 .idea/
+*.log
+*.tmp
+*.ckpt
+*.pyc
+*.pth
+
 
 # Dataset folders (large, regenerable artifacts)
 data*/
@@ -27,6 +33,8 @@ split_data_train_20000_random/
 split_data_validation*/
 split_data_validation_20000_random/
 test_data/
+local/
+
 
 # Any folder containing "data" in its name
 *data*/
