@@ -1,4 +1,4 @@
-# Project Summary: Model Optimization for m-height Prediction
+# Activation, loss fonction and Model Optimization for m-height Prediction
 
 This document summarizes the iterative process of experimenting with and optimizing a ResNet-based model for the m-height prediction task.
 
