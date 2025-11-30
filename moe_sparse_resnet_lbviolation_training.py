@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader, random_split
+from torch.utils.data import Dataset, DataLoader, random_split, Subset
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -134,7 +134,7 @@ class ResNet2DWithParams(nn.Module):
     and a 3D parameter vector (n, k, m). Optional lower-bound enforcement.
     """
 
-    def __init__(self, k_max=6, nk_max=6, n_params=3, base_ch=64, num_blocks=5, enforce_lower_bound=True):
+    def __init__(self, k_max=6, nk_max=6, n_params=3, base_ch=32, num_blocks=5, enforce_lower_bound=True, dropout_p=0.0):
         super().__init__()
         self.enforce_lower_bound = enforce_lower_bound
         self.stem = nn.Sequential(
@@ -148,6 +148,7 @@ class ResNet2DWithParams(nn.Module):
         self.head = nn.Sequential(
             nn.Linear(flat_dim + 64, 256),
             nn.ReLU(inplace=True),
+            nn.Dropout(p=dropout_p),
             nn.Linear(256, 1),
         )
 
@@ -450,6 +451,48 @@ def load_pretrained_experts(moe_model, checkpoint_path, device):
     print(f"Loaded pretrained weights into {len(moe_model.experts)} experts from {checkpoint_path}.")
 
 
+def compute_pairwise_logmse(model, loader, device):
+    """
+    Evaluates the model on the provided loader and returns average log2-MSE per (n,k) pair.
+    """
+    model.eval()
+    stats = defaultdict(lambda: {"loss_sum": 0.0, "count": 0})
+    with torch.no_grad():
+        for params, targets, P in loader:
+            params = params.to(device)
+            targets = targets.to(device)
+            P = P.to(device)
+            preds = model(P, params)
+            preds = torch.clamp(preds, min=EPS)
+            targets = torch.clamp(targets, min=EPS)
+            batch_loss = (torch.log2(targets) - torch.log2(preds)) ** 2  # (B,1)
+            for i in range(batch_loss.size(0)):
+                n_val = int(params[i, 0].item())
+                k_val = int(params[i, 1].item())
+                stats[(n_val, k_val)]["loss_sum"] += batch_loss[i].item()
+                stats[(n_val, k_val)]["count"] += 1
+    pair_metrics = {}
+    for pair, values in stats.items():
+        if values["count"] == 0:
+            continue
+        pair_metrics[pair] = values["loss_sum"] / values["count"]
+    return pair_metrics
+
+
+def get_indices_for_pairs(dataset: PickleFolderDataset, pairs):
+    """
+    Returns a list of dataset indices whose (n,k) pair is included in `pairs`.
+    """
+    if not pairs:
+        return []
+    n_all = dataset.n_vals.cpu().numpy().astype(int)
+    k_all = dataset.k_vals.cpu().numpy().astype(int)
+    mask = np.zeros_like(n_all, dtype=bool)
+    for n_val, k_val in pairs:
+        mask |= ((n_all == n_val) & (k_all == k_val))
+    return np.where(mask)[0].tolist()
+
+
 # ==============================================================================
 # === Main =====================================================================
 # ==============================================================================
@@ -477,6 +520,16 @@ if __name__ == "__main__":
     GATE_HIDDEN = 32
     LAMBDA_VIOLATION = 0.55
     NUM_SAMPLES = 20
+    DROPOUT_P = 0.5 # Added for regularization
+
+    ANALYSE_PAIRWISE = True
+    RUN_GATE_CALIBRATION = True
+    GATE_CAL_TOP_PAIRS = 1
+    GATE_CAL_BATCH_SIZE = 512
+    GATE_CAL_VAL_RATIO = 0.2
+    GATE_CAL_EPOCHS = 15
+    GATE_CAL_PATIENCE = 6
+    GATE_CAL_LR = 5e-4
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
@@ -521,9 +574,10 @@ if __name__ == "__main__":
         "k_max": max_k,
         "nk_max": max_nk,
         "n_params": 3,
-        "base_ch": 64,
-        "num_blocks": 5,
+        "base_ch": 32,
+        "num_blocks": 4,
         "enforce_lower_bound": True,
+        "dropout_p": DROPOUT_P, # Added dropout probability
     }
     moe_model = SparseMoEResNet(
         num_experts=NUM_EXPERTS,
@@ -565,3 +619,80 @@ if __name__ == "__main__":
         print(f"Best validation LogMSE: {best_val:.4f}")
     else:
         print("Training did not log any validation losses.")
+
+    # --- Post-training analysis and gate calibration --------------------------
+    if ANALYSE_PAIRWISE or RUN_GATE_CALIBRATION:
+        if not os.path.exists(MOE_CHECKPOINT):
+            raise FileNotFoundError(f"MoE checkpoint not found at {MOE_CHECKPOINT}")
+        moe_model.load_state_dict(torch.load(MOE_CHECKPOINT, map_location=device))
+
+        pair_metrics = compute_pairwise_logmse(moe_model, val_loader, device=device)
+        if pair_metrics:
+            print("\nPer-(n,k) validation LogMSE:")
+            for (n_val, k_val), loss in sorted(pair_metrics.items(), key=lambda x: x[0]):
+                print(f"  (n={n_val}, k={k_val}) -> {loss:.4f}")
+        else:
+            print("Could not compute per-pair metrics (no data).")
+
+    if RUN_GATE_CALIBRATION:
+        sorted_pairs = sorted(pair_metrics.items(), key=lambda x: x[1], reverse=True)
+        focus_pairs = [pair for pair, _ in sorted_pairs[:GATE_CAL_TOP_PAIRS]]
+        if not focus_pairs:
+            print("Gate calibration skipped: no focus pairs identified.")
+        else:
+            print(f"\nGate calibration focus pairs: {focus_pairs}")
+            focus_indices = get_indices_for_pairs(dataset, focus_pairs)
+            if len(focus_indices) < 10:
+                print("  Not enough samples for gate calibration subset. Skipping.")
+            else:
+                subset_dataset = Subset(dataset, focus_indices)
+                val_size = max(1, int(len(subset_dataset) * GATE_CAL_VAL_RATIO))
+                train_size = len(subset_dataset) - val_size
+                if train_size <= 0:
+                    raise ValueError("Gate calibration subset too small to split.")
+                gate_train, gate_val = random_split(subset_dataset, [train_size, val_size])
+                gate_train_loader = DataLoader(
+                    gate_train,
+                    batch_size=GATE_CAL_BATCH_SIZE,
+                    shuffle=True,
+                    num_workers=NUM_WORKERS,
+                    pin_memory=PIN_MEMORY,
+                )
+                gate_val_loader = DataLoader(
+                    gate_val,
+                    batch_size=GATE_CAL_BATCH_SIZE,
+                    shuffle=False,
+                    num_workers=NUM_WORKERS,
+                    pin_memory=PIN_MEMORY,
+                )
+
+                for param in moe_model.experts.parameters():
+                    param.requires_grad = False
+                for param in moe_model.gate.parameters():
+                    param.requires_grad = True
+
+                gate_optimizer = optim.AdamW(moe_model.gate.parameters(), lr=GATE_CAL_LR, weight_decay=0.0)
+                gate_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                    gate_optimizer, mode="min", patience=max(1, GATE_CAL_PATIENCE // 2), factor=0.3
+                )
+
+                gate_trainer = MoETrainer(
+                    model=moe_model,
+                    train_loader=gate_train_loader,
+                    val_loader=gate_val_loader,
+                    criterion=criterion,
+                    optimizer=gate_optimizer,
+                    device=device,
+                    patience=GATE_CAL_PATIENCE,
+                    scheduler=gate_scheduler,
+                    model_name="Sparse_MoE_GateCal",
+                )
+                gate_history = gate_trainer.fit(GATE_CAL_EPOCHS)
+                torch.save(moe_model.state_dict(), MOE_CHECKPOINT)
+                if gate_history["val_losses"]:
+                    print(f"Gate calibration best val loss: {min(gate_history['val_losses']):.4f}")
+                updated_metrics = compute_pairwise_logmse(moe_model, val_loader, device=device)
+                if updated_metrics:
+                    print("\nUpdated per-(n,k) validation LogMSE after gate calibration:")
+                    for (n_val, k_val), loss in sorted(updated_metrics.items(), key=lambda x: x[0]):
+                        print(f"  (n={n_val}, k={k_val}) -> {loss:.4f}")
