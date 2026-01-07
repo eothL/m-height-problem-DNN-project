@@ -11,7 +11,10 @@ import glob
 import pickle
 import pandas as pd
 from collections import defaultdict
+from collections import defaultdict
 import traceback
+from trm_model import TRMWithParams
+from adversarial_loss import AdversarialViolationLoss
 
 # ==============================================================================
 # === Model and Loss Definitions ===
@@ -149,6 +152,16 @@ class PickleFolderDataset(Dataset):
         return params, h, p_t
 
 # ==============================================================================
+# === TRM Wrapper / Trainer Update ===
+# ==============================================================================
+# We need to make sure the Trainer handles TRM output (which might be a list or tensor of steps)
+# The trainer currently expects 'outputs' to be passed to criterion. 
+# Our new criterion handles 3D outputs, so we just need to ensure the model returns what's expected.
+# The ResNetTrainer class is generic enough IF the model forward signature matches.
+# TRM forward: (P, params) -> outputs. Correct.
+
+
+# ==============================================================================
 # === Trainer Class ===
 # ==============================================================================
 class ResNetTrainer:
@@ -253,8 +266,13 @@ if __name__ == '__main__':
         "base_ch": 64,
         "num_blocks": 5,
         "lambda_violation": 0.5508697436585597,
+        "lambda_violation": 0.5508697436585597,
         "num_samples": 20
     }
+    
+    # --- Training Modes ---
+    USE_TRM = False # Set to True to use Tiny Recursive Model
+    USE_ADVERSARIAL = False # Set to True to use Adversarial Loss (Slower!)
     
     # --- Violation Loss Hyperparameters ---
     LAMBDA_VIOLATION = BEST_PARAMS["lambda_violation"]
@@ -279,24 +297,59 @@ if __name__ == '__main__':
         print("DataLoaders created.")
     except Exception as e: print(f"\nError during data loading: {e}"); traceback.print_exc(); exit()
 
-    # --- Instantiate Model with Lower Bound Enforcement ---
-    print("\n--- Initializing ReLU-ResNet with Lower Bound and Violation Loss ---")
-    final_model = ResNet2DWithParams(
-        k_max=max_k,
-        nk_max=max_nk,
-        n_params=3,
-        base_ch=BEST_PARAMS["base_ch"],
-        num_blocks=BEST_PARAMS["num_blocks"],
-        enforce_lower_bound=True  # <-- STRATEGY 1a ENABLED
-    ).to(device)
-
-    # --- Loss, Optimizer, Scheduler ---
-    criterion = ViolationInformedLossAccelerated(lambda_violation=LAMBDA_VIOLATION, num_samples=NUM_SAMPLES)
-    optimizer = optim.AdamW(final_model.parameters(), lr=BEST_PARAMS["lr"], weight_decay=BEST_PARAMS["weight_decay"])
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=PATIENCE//2, factor=0.2)
+    # --- Instantiate Model ---
+    if USE_TRM:
+        print("\n--- Model: Tiny Recursive Model (TRM) ---")
+        final_model = TRMWithParams(
+            k_max=max_k, nk_max=max_nk, n_params=3,
+            hidden_dim=128, num_steps=5, enforce_lower_bound=True
+        ).to(device)
+        model_name = "TRM_Recursive"
+        # For TRM, we can use the adversarial loss or standard. Let's use Adversarial if selected.
+        if USE_ADVERSARIAL:
+             print(" + Adversarial Violation Loss")
+             criterion = AdversarialViolationLoss(lambda_violation=LAMBDA_VIOLATION, num_samples=NUM_SAMPLES, adv_steps=5)
+        else:
+             print(" + Standard Violation Loss")
+             # Use Standard Accelerator because Adversarial is slow and we want to test TRM logic first?
+             # Standard Accelerated expects regular outputs. TRM outputs steps.
+             # We need a criterion that handles TRM outputs or a wrapper.
+             # Our AdversarialViolationLoss handles 3D inputs. ViolationInformedLossAccelerated DOES NOT.
+             # FIX: Let's assume for TRM we MUST use a loss compatible with it, OR we modify Trainer to pick last step.
+             # The implementations above in AdversarialViolationLoss handles 3D.
+             # Let's default TRM to AdversarialLoss for compatibility or update the standard loss.
+             # For simplicity, let's use AdversarialLoss for TRM but maybe with 0 adv steps if we want 'standard' behavior?
+             # Or just use the standard loss and ensure we flatten expectations.
+             # Let's just use AdversarialViolationLoss for TRM as it's the new "smart" loss.
+             criterion = AdversarialViolationLoss(lambda_violation=LAMBDA_VIOLATION, num_samples=NUM_SAMPLES, adv_steps=5)
+        
+        optimizer = optim.AdamW(final_model.parameters(), lr=1e-3, weight_decay=1e-4)
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=PATIENCE//2, factor=0.2)
+    elif USE_ADVERSARIAL and not USE_TRM:
+        print("\n--- Model: ResNet + Adversarial Violation Loss ---")
+        final_model = ResNet2DWithParams(
+            k_max=max_k, nk_max=max_nk, n_params=3,
+            base_ch=BEST_PARAMS["base_ch"], num_blocks=BEST_PARAMS["num_blocks"],
+            enforce_lower_bound=True
+        ).to(device)
+        model_name = "ResNet_Adversarial"
+        criterion = AdversarialViolationLoss(lambda_violation=LAMBDA_VIOLATION, num_samples=NUM_SAMPLES, adv_steps=5)
+        optimizer = optim.AdamW(final_model.parameters(), lr=BEST_PARAMS["lr"], weight_decay=BEST_PARAMS["weight_decay"])
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=PATIENCE//2, factor=0.2)
+    else:
+        # Default: ResNet + Standard Violation Loss (as per original file)
+        print("\n--- Model: ResNet + Standard Violation Loss ---")
+        final_model = ResNet2DWithParams(
+            k_max=max_k, nk_max=max_nk, n_params=3,
+            base_ch=BEST_PARAMS["base_ch"], num_blocks=BEST_PARAMS["num_blocks"],
+            enforce_lower_bound=True
+        ).to(device)
+        model_name = "ReLU_ResNet_LowerBound_ViolationLoss_FineTuned"
+        criterion = ViolationInformedLossAccelerated(lambda_violation=LAMBDA_VIOLATION, num_samples=NUM_SAMPLES)
+        optimizer = optim.AdamW(final_model.parameters(), lr=BEST_PARAMS["lr"], weight_decay=BEST_PARAMS["weight_decay"])
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=PATIENCE//2, factor=0.2)
 
     # --- Instantiate and Run Trainer ---
-    model_name = "ReLU_ResNet_LowerBound_ViolationLoss_FineTuned"
     trainer = ResNetTrainer(
         model=final_model, train_loader=train_loader, val_loader=val_loader,
         criterion=criterion, optimizer=optimizer, device=device,
