@@ -20,7 +20,31 @@ This repository captures my CSCE 636 project on predicting the m-height of linea
 - **Best Architecture** – Sparse soft-gated MoE with six ResNet experts (each 64 channels × 5 residual blocks), gating on `(n, k)` and fine-tuned end-to-end.
 - **Metrics** – Validation Log2-MSE ≈ **0.88**, random hold-out test ≈ **0.93**, compared to the original LP baseline (~1.13).
 - **Reproduction** – Running `python final_best_model_training.py` after regenerating `split_data_*` shards reproduces the lower-bound + violation-loss ResNet. For the MoE, load the saved weights and reuse the same data folders.
-
+- **Average log2 MSE loss per (n,k,m) group**:  
+Validation Loss per (n, k, m) Group:  
+            Avg Log2 MSE 
+(n, k, m)                 
+(9, 4, 2)           0.1456   
+(9, 4, 3)           0.1425    
+(9, 4, 4)           0.5461    
+(9, 4, 5)           2.0272    
+(9, 5, 2)           0.1180    
+(9, 5, 3)           0.4621     
+(9, 5, 4)           2.1613    
+(9, 6, 2)           0.1349    
+(9, 6, 3)           2.1572    
+(10, 4, 2)          0.8037    
+(10, 4, 3)          0.0827     
+(10, 4, 4)          0.1773   
+(10, 4, 5)          0.6114     
+(10, 4, 6)          2.1771    
+(10, 5, 2)          0.0862     
+(10, 5, 3)          0.1978    
+(10, 5, 4)          0.6641    
+(10, 5, 5)          2.5144      
+(10, 6, 2)          0.1197     
+(10, 6, 3)          0.5451    
+(10, 6, 4)          2.6729    
 ## Sharing on Hugging Face
 If you want to publish the model:
 1. Remove proprietary datasets (the `.gitignore` already keeps them local).

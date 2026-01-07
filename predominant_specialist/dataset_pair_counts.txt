@@ -1,0 +1,8 @@
+(n, k) pair counts across ./split_data_train_20000_random + ./split_data_validation_20000_random
+Total samples: 840000
+(9, 4): 160000
+(9, 5): 120000
+(9, 6): 80000
+(10, 4): 200000
+(10, 5): 160000
+(10, 6): 120000
