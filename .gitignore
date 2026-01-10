@@ -20,7 +20,7 @@ venv/
 *.pyc
 *.pth
 *pkl
-
+*.zip
 
 # Dataset folders (large, regenerable artifacts)
 data*/
@@ -38,7 +38,7 @@ split_data_validation_20000_random/
 test_data/
 local/
 folder_to_submit/ 
-
+wandb/
 
 # Any folder containing "data" in its name
 *data*/

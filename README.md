@@ -45,8 +45,4 @@ Validation Loss per (n, k, m) Group:
 (10, 6, 2)          0.1197     
 (10, 6, 3)          0.5451    
 (10, 6, 4)          2.6729    
-## Sharing on Hugging Face
-If you want to publish the model:
-1. Remove proprietary datasets (the `.gitignore` already keeps them local).
-2. Upload the final checkpoint(s) plus a lightweight README/model card summarizing the dataset origin, preprocessing, architecture, and metrics (this file and `project_summary.md` are good templates).
-3. Optionally include a small synthetic shard or schema description so others can reproduce the splits without full access to Keegan Smith's raw data.
+
