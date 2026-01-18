@@ -46,6 +46,7 @@ Validation Loss per (n, k, m) Group:
 (10, 6, 3)          0.5451    
 (10, 6, 4)          2.6729
 
-We can see that high value of m in each pairs of (n,k) has higher loss value, it maybe due to different scale. As we can see during the analyses of the distribution of values, the magnitude of h is getting bigger for higher m 
+We can see that high value of m in each pairs of (n,k) has higher loss value, it maybe due to different scale. As we can see during the analyses of the distribution of values, the magnitude of h is getting bigger for higher m.
 
+<img width="2428" height="764" alt="image" src="https://github.com/user-attachments/assets/5f6343b6-02d5-491e-bbdf-4a4e1fdb9222" />
 
