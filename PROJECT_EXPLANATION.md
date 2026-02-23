@@ -61,15 +61,17 @@ Over the course of the project, we explored a wide variety of architectures and 
 
 ## 2. Problem Definition
 
-### What Is a Linear Code?
+### What Is an Analog Linear Code?
 
-A **linear code** C(n, k) is a k-dimensional subspace of an n-dimensional vector space over a field. It is characterized by two parameters:
-- **n** — the **code length** (number of symbols in each codeword)
-- **k** — the **dimension** (number of information symbols encoded)
+When we think of error-correcting codes, we usually think of digital data (0s and 1s) and finite fields. However, this project concerns **analog linear codes** — codes where the symbols are **real numbers** ($\mathbb{R}$), not discrete bits.
 
-The ratio k/n is called the **code rate** — it measures how much of each transmitted symbol carries actual information versus redundancy. A code with n=10 and k=4 has a rate of 0.4, meaning 40% of the transmitted data is information and 60% is protective redundancy.
+An analog linear code C(n, k) is a k-dimensional subspace of the continuous n-dimensional real vector space $\mathbb{R}^n$. It is characterized by:
+- **n** — the **code length** (number of real-valued measurements/symbols)
+- **k** — the **dimension** (number of real-valued information variables)
 
-A linear code can be fully described by a **generator matrix** G of shape (k × n). Every codeword c in the code is produced by multiplying an information vector x by G:
+These codes are foundational to **Compressed Sensing (CS)** and **Sparse Signal Recovery**. In compressed sensing, we try to reconstruct a high-dimensional sparse signal from a small number of analog measurements. The mathematical framework of analog error correction is precisely what governs whether this recovery is possible and how robust it is to noise.
+
+A linear code over $\mathbb{R}$ is fully described by a **generator matrix** G of shape (k × n). Every codeword c is produced by multiplying a real information vector x by G:
 
 ```
 c = x · G
@@ -82,75 +84,66 @@ G = [I_k | P]
 ```
 
 where:
-- `I_k` is the k×k identity matrix (the information part — it passes the original data through unchanged)
-- `P` is a k×(n−k) matrix (the **parity part** — it generates the redundant symbols that enable error correction)
+- `I_k` is the k×k identity matrix (the information part)
+- `P` is a k×(n−k) matrix (the **parity part** — generating the continuous redundant measurements)
 
-**The P matrix encodes all the "error-correcting magic" of the code, and is our primary input to the neural network.**
+**The P matrix encodes the geometry of this subspace, and is our primary input to the neural network.**
 
 ### What Is M-Height?
 
-The **m-height** is a property that measures how well a code's information is distributed across its codeword coordinates. Intuitively, it captures the worst-case "concentration" of a codeword's energy.
+In compressed sensing and real-number coding theory, the **m-height** is a geometric property that measures the "robustness" or "quality" of the code. It captures the worst-case scenario of how concentrated a codeword's energy can be.
 
 #### The Formal Definition
 
-For a codeword **c** = (c₁, c₂, …, cₙ), consider its component magnitudes |c₁|, |c₂|, …, |cₙ|. Sort these in **decreasing order**:
+For a codeword **c** = (c₁, c₂, …, cₙ) ∈ $\mathbb{R}^n$, consider its component magnitudes |c₁|, |c₂|, …, |cₙ|. Sort these continuous values in **decreasing order**:
 
 ```
 |c|₍₁₎ ≥ |c|₍₂₎ ≥ ... ≥ |c|₍ₙ₎
 ```
 
-The **m-height of this codeword** is the ratio:
+The **m-height of this individual codeword** is the ratio between its largest and its (m+1)-th largest component:
 
 ```
 hₘ(c) = |c|₍₁₎ / |c|₍ₘ₊₁₎
 ```
 
-That is: the ratio of the **largest** component to the **(m+1)-th largest** component. The **m-height of the entire code** is then the **maximum** of hₘ(c) over all nonzero codewords:
+The **m-height of the entire code** is the maximum of this ratio over all possible nonzero codewords in the continuous subspace:
 
 ```
 hₘ(C) = max { hₘ(c) : c ∈ C, c ≠ 0 }
 ```
 
-#### Intuition: What Does M-Height Tell Us?
+#### Physical Intuition: Why Do We Care?
 
-Think of each codeword as a signal spread across n coordinates. The m-height asks: **"How imbalanced can this signal get?"**
+Think of a codeword as an analog waveform or an image sampled at n points. The m-height asks: **"What is the most extreme spike this code can produce relative to its background?"**
 
-- A **low m-height** (close to 1) means that for every codeword, the energy is distributed relatively evenly — the largest component is not much bigger than the (m+1)-th largest. This is desirable because it means the code spreads information uniformly.
+- A **low m-height** (close to 1) means that no matter what information you encode, the resulting codeword's energy is smeared out evenly. There are no massive isolated "spikes." In compressed sensing, this is mathematically similar to the **Restricted Isometry Property (RIP)** or the **Null Space Property (NSP)** — matrices with this property are excellent for sparse recovery because errors cannot easily disguise themselves as sparse signals.
 
-- A **high m-height** means there exist codewords where the energy is extremely concentrated — one component dominates while others are tiny. This can be problematic for certain decoding strategies.
+- A **high m-height** means the code contains "spiky" codewords — vectors where almost all the energy is concentrated in just m components, with the rest being vanishingly small. If a code has spiky codewords, an analog error pattern could look exactly like a valid codeword, making error correction impossible. High m-heights mean the code is fragile.
 
-The m-height forms a **hierarchy** indexed by m. For a code of length n:
+The m-height forms a **hierarchy** indexed by m:
 
 ```
 1 = h₀(C) ≤ h₁(C) ≤ h₂(C) ≤ ... ≤ hₙ₋₁(C)
 ```
 
-This sequence — the **height profile** — provides a multi-scale view of how information spreads across coordinates. It is used in the design and analysis of certain decoding algorithms and in assessing a code's structural properties.
-
-#### Why Is It Related to Generalized Hamming Weights?
-
-The m-height is conceptually linked to the **generalized Hamming weights** (GHWs), another hierarchy that characterizes how subcodes of C spread across coordinates. The GHWs {d₁, d₂, …, dₖ} were introduced by Wei (1991) and are important for:
-- **Wiretap channel security**: GHWs determine how much information an eavesdropper can extract
-- **Secret sharing schemes**: The weight hierarchy controls the access structure
-- **Trellis decoding complexity**: GHWs bound the state complexity of optimal decoders
-
-While GHWs count **how many** coordinates a subcode touches, the m-height measures **how unevenly** energy is distributed across those coordinates. Both provide complementary views of the code's structural quality.
+This **height profile** tells us exactly how many continuous errors the code can safely correct using certain polynomial-time decoders (like Linear Programming decoders or Basis Pursuit).
 
 ### Why Is Computing M-Height Hard?
 
-Computing the exact m-height requires finding the codeword that **maximizes** the ratio |c|₍₁₎ / |c|₍ₘ₊₁₎ over the entire code. Since a linear (n, k) code contains an exponential number of codewords (qᵏ for a code over a field of size q), naively checking all codewords is infeasible.
+Computing the exact m-height requires finding the codeword that **maximizes** the ratio |c|₍₁₎ / |c|₍ₘ₊₁₎. Because the code is over the real numbers ($\mathbb{R}$), there are infinitely many codewords to check. This is fundamentally a continuous optimization problem over a high-dimensional polytope.
 
-Instead, the m-height is computed by formulating the problem as a **Linear Program (LP)**:
+It is computed by formulating the problem as a **Linear Program (LP)** (or a series of them):
 
 ```
 maximize    |c|₍₁₎ / |c|₍ₘ₊₁₎
 subject to  c = x · G,  x ∈ ℝᵏ
 ```
 
-LP solvers (such as PuLP, which was used in this project) can find the optimal solution, but the computation is expensive:
-- The problem must be solved **separately for each (n, k, m) combination**
-- For large codes, the LP can have many variables and constraints
-- Generating a large dataset requires millions of LP solves
+LP solvers can find the precise optimal solution, but the computation is expensive:
+- The LP must explore combinatorial orderings of the continuous magnitudes.
+- The solver must run from scratch for every new (n, k, m) combination and every new generator matrix.
+- Generating a comprehensive dataset requires millions of intensive LP solver calls.
 
 In this project, generating ~420,000 training samples required significant compute time on the Texas A&M **High Performance Research Computing (HPRC)** cluster. A neural network that can approximate the m-height in a single forward pass — in milliseconds rather than seconds — would be transformatively faster.
 
