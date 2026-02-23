@@ -131,21 +131,33 @@ This **height profile** tells us exactly how many continuous errors the code can
 
 ### Why Is Computing M-Height Hard?
 
-Computing the exact m-height requires finding the codeword that **maximizes** the ratio |c|₍₁₎ / |c|₍ₘ₊₁₎. Because the code is over the real numbers ($\mathbb{R}$), there are infinitely many codewords to check. This is fundamentally a continuous optimization problem over a high-dimensional polytope.
+Computing the exact m-height requires finding the codeword that **maximizes** the ratio |c|₍₁₎ / |c|₍ₘ₊₁₎. Because the code is over the real numbers ($\mathbb{R}$), there are infinitely many codewords to check. This makes it fundamentally different from discrete codes (where you can theoretically brute-force $2^k$ combinations), but just as computationally devastating.
 
-It is computed by formulating the problem as a **Linear Program (LP)** (or a series of them):
+Finding the exact m-height of a continuous linear code involves sorting continuous magnitudes and taking absolute values, which turns the optimization into an **NP-hard** combinatorial problem (mathematically equivalent to computing the "Restricted Isometry Constant" or "Spark" in CS).
+
+It is computed by formulating the problem as a **Mixed Integer Linear Program (MILP)** or a series of intensive LPs:
 
 ```
 maximize    |c|₍₁₎ / |c|₍ₘ₊₁₎
 subject to  c = x · G,  x ∈ ℝᵏ
 ```
 
-LP solvers can find the precise optimal solution, but the computation is expensive:
-- The LP must explore combinatorial orderings of the continuous magnitudes.
+LP/MILP solvers can find the precise optimal solution, but the computation is agonizingly expensive:
+- The solver must rigorously explore combinatorial orderings of the continuous magnitudes.
 - The solver must run from scratch for every new (n, k, m) combination and every new generator matrix.
-- Generating a comprehensive dataset requires millions of intensive LP solver calls.
+- Generating a comprehensive dataset requires millions of intensive solver calls.
 
-In this project, generating ~420,000 training samples required significant compute time on the Texas A&M **High Performance Research Computing (HPRC)** cluster. A neural network that can approximate the m-height in a single forward pass — in milliseconds rather than seconds — would be transformatively faster.
+#### The Engineering Reality: Random vs. Structured Codes
+
+If computing m-height is NP-hard, how do engineers actually build these systems? 
+
+In pure theory, they don't compute it. Mathematicians proved that if you generate a generator matrix $G$ completely at **random** (e.g., pulling numbers from a Bell curve), it is almost guaranteed to have an excellent, low m-height. 
+
+However, in the real world, **random matrices are a nightmare for hardware**. To encode or decode data on a 5G chip or an MRI machine, the hardware must perform matrix multiplication millions of times per second. A dense, random matrix takes far too much memory and power to multiply.
+
+To make hardware fast, engineers design **structured matrices** (matrices that are mostly zeros or have repeating patterns, allowing for $O(n \log n)$ multiplication). But here is the catch: **the mathematical guarantees only apply to perfectly random matrices.** The moment engineers introduce structure to make the matrix fast, they lose the guarantee that the m-height is good. 
+
+They are forced to compute the m-height explicitly to prove their new, hardware-friendly matrix is robust. In this project, generating ~420,000 training samples required significant compute time on the Texas A&M **High Performance Research Computing (HPRC)** cluster. A neural network that can approximate the m-height in a single forward pass — in milliseconds rather than seconds — acts as a critical proxy, answering the exact question hardware designers struggle with without requiring supercomputers.
 
 ### The Inputs and Output
 
